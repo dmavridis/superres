@@ -14,7 +14,7 @@ from wandb.keras import WandbCallback
 run = wandb.init(project='superres')
 config = run.config
 
-config.num_epochs = 50
+config.num_epochs = 2#50
 config.batch_size = 32
 config.input_height = 32
 config.input_width = 32
@@ -84,17 +84,23 @@ class ImageLogger(Callback):
             "examples": [wandb.Image(np.concatenate([in_resized[i] * 255, o * 255, out_sample_images[i] * 255], axis=1)) for i, o in enumerate(preds)]
         }, commit=False)
 
+    
 
-model = Sequential()
-model.add(layers.Conv2D(3, (3, 3), activation='relu', padding='same',
-                        input_shape=(config.input_width, config.input_height, 3)))
-model.add(layers.UpSampling2D())
-model.add(layers.Conv2D(3, (3, 3), activation='relu', padding='same'))
-model.add(layers.UpSampling2D())
-model.add(layers.Conv2D(3, (3, 3), activation='relu', padding='same'))
-model.add(layers.UpSampling2D())
-model.add(layers.Conv2D(3, (3, 3), activation='relu', padding='same'))
+def superres_model():
+    model = Sequential()
+    model.add(layers.Conv2D(3, (3, 3), activation='relu', padding='same',
+                            input_shape=(config.input_width, config.input_height, 3)))
+    model.add(layers.UpSampling2D())
+    model.add(layers.Conv2D(3, (3, 3), activation='relu', padding='same'))
+    model.add(layers.UpSampling2D())
+    model.add(layers.Conv2D(3, (3, 3), activation='relu', padding='same'))
+    model.add(layers.UpSampling2D())
+    model.add(layers.Conv2D(3, (3, 3), activation='relu', padding='same'))
+    
+    print(model.summary())
+    return model
 
+model = superres_model()
 # DONT ALTER metrics=[perceptual_distance]
 model.compile(optimizer='adam', loss='mse',
               metrics=[perceptual_distance])
