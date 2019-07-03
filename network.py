@@ -81,7 +81,7 @@ class Generator(object):
         model = Conv2D(filters = 3, kernel_size = 9, strides = 1, padding = "same")(model)
         model = Activation('tanh')(model)
         
-        generator_model = Model(inputs = gen_input, outputs = model)
+        generator_model = Model(inputs = gen_input, outputs = model, name='Generator')
         generator_model.summary()
         return generator_model
 
@@ -113,21 +113,21 @@ class Discriminator(object):
         model = Dense(1)(model)
         model = Activation('sigmoid')(model) 
         
-        discriminator_model = Model(inputs = dis_input, outputs = model)
+        discriminator_model = Model(inputs = dis_input, outputs = model, name='Discriminator')
         discriminator_model.summary()
         return discriminator_model
     
 
-def get_gan_network(discriminator, shape, generator, optimizer, gan_metric = None):
+def get_gan_network(discriminator, shape, generator):
     discriminator.trainable = False
     gan_input = Input(shape=shape)
-    x = generator(gan_input)
-    gan_output = discriminator(x)
-    gan = Model(inputs=gan_input, outputs=[x,gan_output])
-    gan.compile(
-            loss=['mse', 'binary_crossentropy'],
-            loss_weights=[1., 1e-3],
-            optimizer=optimizer,
+    generated_images = generator(gan_input)
+    outputs = discriminator(generated_images)
+    gan = Model(inputs=gan_input, outputs=[generated_images, outputs])
+#    gan.compile(
+#            loss=['mse', 'binary_crossentropy'],
+#            loss_weights=[1., 1e-3],
+#            optimizer=optimizer,
 #            metrics = {'gan_output':gan_metric}
-            )
+#            )
     return gan
