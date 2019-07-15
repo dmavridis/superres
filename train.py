@@ -7,15 +7,25 @@ import numpy as np
 from tensorflow.keras import backend as K
 from tensorflow.keras.callbacks import Callback
 import wandb
-from wandb.keras import WandbCallback
-from tqdm import tqdm
+# from wandb.keras import WandbCallback
+# from tqdm import tqdm
 from network import Generator, Discriminator, gan
+from transforms import *
+
+transforms_dict = {
+                    0: flipx, 
+                    1: flipy,
+                    2: addbias,
+                    3: rollx,
+                    4: rolly,
+                  }
+keys = list(transforms_dict.keys())
 
 
 run = wandb.init(project='superres')
 config = run.config
-config.num_epochs = 1#50
-config.batch_size = 8
+config.num_epochs = 20#50
+config.batch_size = 12
 config.input_height = 32
 config.input_width = 32
 config.output_height = 256
@@ -24,21 +34,18 @@ config.output_width = 256
 val_dir = 'data/test'
 train_dir = 'data/train'
 
+config.steps_per_epoch = len(
+    glob.glob(train_dir + "/*-in.jpg")) // config.batch_size
+config.val_steps_per_epoch = len(
+    glob.glob(val_dir + "/*-in.jpg")) // config.batch_size
+
 # automatically get the data if it doesn't exist
 if not os.path.exists("data"):
     print("Downloading flower dataset...")
     subprocess.check_output(
         "mkdir data && curl https://storage.googleapis.com/wandb/flower-enhance.tar.gz | tar xz -C data", shell=True)
 
-#config.steps_per_epoch = len(
-#    glob.glob(train_dir + "/*-in.jpg")) // config.batch_size
-#config.val_steps_per_epoch = len(
-#    glob.glob(val_dir + "/*-in.jpg")) // config.batch_size
-    
-config.steps_per_epoch = 2
-config.val_steps_per_epoch = 20
-
-def image_generator_d(batch_size, img_dir):
+def image_generator(batch_size, img_dir):
     """A generator that returns small images and large images.  DO NOT ALTER the validation set"""
     input_filenames = glob.glob(img_dir + "/*-in.jpg")
     counter = 0
@@ -58,7 +65,7 @@ def image_generator_d(batch_size, img_dir):
         yield (small_images.astype('float32'), large_images.astype('float32'))
         counter += batch_size
 
-def image_generator_g(batch_size, img_dir):
+def image_generator_aug(batch_size, img_dir):
     """A generator that returns small images and large images.  DO NOT ALTER the validation set"""
     input_filenames = glob.glob(img_dir + "/*-in.jpg")
     counter = 0
@@ -68,13 +75,16 @@ def image_generator_g(batch_size, img_dir):
         large_images = np.zeros(
             (batch_size, config.output_width, config.output_height, 3))
         random.shuffle(input_filenames)
-        if counter+batch_size >= len(input_filenames):
+        if counter+batch_size >= 2*len(input_filenames):
             counter = 0
         for i in range(batch_size):
+            tr = np.random.randint(0,10)
             img = input_filenames[counter + i]
             small_images[i] = np.array(Image.open(img)) / 255.0
             large_images[i] = np.array(
                 Image.open(img.replace("-in.jpg", "-out.jpg"))) / 255.0
+            if tr in keys:
+                small_images[i], large_images[i] = transforms_dict[tr](small_images[i], large_images[i])
         yield (small_images.astype('float32'), large_images.astype('float32'))
         counter += batch_size
 
@@ -90,7 +100,7 @@ def perceptual_distance(y_true, y_pred):
 
     return K.mean(K.sqrt((((512+rmean)*r*r)/256) + 4*g*g + (((767-rmean)*b*b)/256)))
 
-val_generator = image_generator_g(config.batch_size, val_dir)
+val_generator = image_generator(config.batch_size, val_dir)
 in_sample_images, out_sample_images = next(val_generator)
 
 class ImageLogger(Callback):
@@ -116,8 +126,7 @@ srgan = gan(g, d, input_shape)
 for e in range(1, config.num_epochs+1):
     for step in range(config.steps_per_epoch):
 
-        image_batch_lr, image_batch_hr = next(image_generator_g(config.batch_size, train_dir))
-
+        image_batch_lr, image_batch_hr = next(image_generator_aug(config.batch_size, train_dir))
         generated_images_sr = g.predict(image_batch_lr)
         
         real_data_Y = np.ones(config.batch_size) - np.random.random_sample(config.batch_size)*0.2
@@ -128,47 +137,25 @@ for e in range(1, config.num_epochs+1):
         d_loss_fake = d.train_on_batch(generated_images_sr, fake_data_Y)
         d_loss = 0.5 * np.add(d_loss_fake, d_loss_real)
         
-        image_batch_lr, image_batch_hr = next(image_generator_d(config.batch_size, train_dir))
+        image_batch_lr, image_batch_hr = next(image_generator_aug(config.batch_size, train_dir))
         
         gan_Y = np.ones(config.batch_size) - np.random.random_sample(config.batch_size)*0.2
         d.trainable = False
-        loss_gan = srgan.train_on_batch(image_batch_lr, [image_batch_hr,gan_Y])
+        loss = srgan.train_on_batch(image_batch_lr, [image_batch_hr,gan_Y])
         
-    gan_loss, _, _, perc_dist, _ = loss_gan
+    gan_loss, _, _, perc_dist, _ = loss
     wandb.log({
         'epoch': e,
-        'loss': gan_loss,
+        'loss': loss,
         'perceptual_distance': perc_dist})
 
-#    g.evaluate_generator(generator=image_generator_d, steps=10, callbacks=[perceptual_distance])
-#g.evaluate_generator(image_generator_d(config.batch_size, train_dir), 
-#                     steps=20,
-#                     callbacks=[ImageLogger(),WandbCallback()])
-
-    # Test
-    
-#    for _ in range(config.val_steps_per_epoch):
-#        image_batch_lr, image_batch_hr = next(image_generator_d(config.batch_size, val_dir))
-#        val_loss_gan = gan.test_on_batch(image_batch_lr, [image_batch_hr,gan_Y])
-                
-    
-    
-#        if e == 1 or e % 5 == 0:
-#            plot_generated_images(e, generator)
-#        if e % 300 == 0:
-#            generator.save('./output/gen_model%d.h5' % e)
-#            discriminator.save('./output/dis_model%d.h5' % e)
-#            gan.save('./output/gan_model%d.h5' % e)
-
-#    
-#    
-## DONT ALTER metrics=[perceptual_distance]
-#model.compile(optimizer='adam', loss='mse',
-#              metrics=[perceptual_distance])
-#
-#model.fit_generator(image_generator(config.batch_size, train_dir),
-#                    steps_per_epoch=config.steps_per_epoch,
-#                    epochs=config.num_epochs, callbacks=[
-#                        ImageLogger(), WandbCallback()],
-#                    validation_steps=config.val_steps_per_epoch,
-#                    validation_data=val_generator)
+# Test
+    for _ in range(config.val_steps_per_epoch):
+        image_batch_lr, image_batch_hr = next(image_generator(config.batch_size, val_dir))
+        val_loss_gan = srgan.test_on_batch(image_batch_lr, [image_batch_hr,gan_Y])
+        val_loss, _, _, val_perc_dist, _ = val_loss_gan
+    wandb.log({
+             'epoch': e,
+             'val_loss': val_loss,
+             'val_perceptual_distance': val_perc_dist})
+    print(f'Epoch {e} => loss: {gan_loss:.2f}, perceptual distance: {perc_dist:.2f}, val_loss: {val_loss:.2f}, val_perceptual distance: {val_perc_dist:.2f}')

@@ -98,7 +98,7 @@ class Discriminator(object):
         discriminator.summary()
         
         opt = Adam(lr=1E-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
-        discriminator.compile(optimizer=opt, loss=wasserstein_loss, metrics=['acc'])
+        discriminator.compile(optimizer=opt, loss='mse', metrics=['acc'])
         return discriminator
             
 def gan(generator, discriminator, shape):
